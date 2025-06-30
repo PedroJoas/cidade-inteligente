@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package smart_city; 
+
+message InformacaoDispositivo {
+  string id = 1;     
+  string tipo = 2;   
+  string ip = 3;     
+  int32 porta = 4;   
+  string estado = 5; 
+}
+
+message DescobertaMulticast {
+  enum TipoMensagem {
+    TIPO_MULTICAST_DESCONHECIDO = 0;
+    REQUISICAO_DESCOBERTA = 1;  
+    RESPOSTA_DESCOBERTA = 2;    
+  }
+
+  TipoMensagem tipo_mensagem = 1; 
+  string ip_gateway = 2;          
+  int32 porta_gateway_tcp = 3;    
+
+  
+  InformacaoDispositivo informacao_dispositivo = 4; 
+}
+
+message ComandoAtuador {
+  string id_dispositivo = 1; 
+
+  enum TipoComandoAtuador {
+    COMANDO_ATUADOR_DESCONHECIDO = 0;
+    LIGAR_DESLIGAR = 1;         
+    DEFINIR_TEMPERATURA = 2;
+  }
+  
+  TipoComandoAtuador tipo_comando = 2;
+  string valor = 3; 
+}
+
+message AtualizacaoEstadoDispositivo {
+  string id_dispositivo = 1;
+  string estado_atual = 2; 
+  
+  float valor_leitura = 3; 
+  string unidade = 4;      
+}
