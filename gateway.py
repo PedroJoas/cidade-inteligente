@@ -2,262 +2,235 @@ import socket
 import threading
 import time
 import struct
-import cliente_gateway_pb2      
-import gateway_atuadores_pb2 
+from Protos import cliente_gateway_pb2
+from Protos import gateway_atuadores_pb2
 
+# Configurações
+IP_GATEWAY = '0.0.0.0'
+PORTA_TCP_CLIENTE = 50000
+PORTA_UDP_MULTICAST = 12346
+GRUPO_MULTICAST = '224.1.1.1'
+PORTA_UDP_DISPOSITIVOS = 12347
 
-IP_GATEWAY = '127.0.0.1' 
-PORTA_TCP_CLIENTE = 50000 
-PORTA_UDP_MULTICAST = 12346 
-GRUPO_MULTICAST = '224.1.1.1' 
-PORTA_UDP_DISPOSITIVOS = 12347 
-
-dispositivos_conectados = {}
-
-dispositivos_lock = threading.Lock()
-
-
-def iniciar_descoberta_multicast():
-
-    multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2) 
-    
-    print(f"[Descoberta Multicast] Iniciando processo de descoberta multicast na porta {PORTA_UDP_MULTICAST}...")
-
-    
-    discovery_request = gateway_atuadores_pb2.DescobertaMulticast()
-    discovery_request.tipo_mensagem = gateway_atuadores_pb2.DescobertaMulticast.REQUISICAO_DESCOBERTA
-    discovery_request.ip_gateway = IP_GATEWAY
-    discovery_request.porta_gateway_tcp = PORTA_TCP_CLIENTE 
-
-    mensagem_serializada = discovery_request.SerializeToString()
-
-    try:
+class Gateway:
+    def __init__(self):
+        self.dispositivos_conectados = {}
+        self.dispositivos_lock = threading.Lock()
         
-        multicast_socket.sendto(mensagem_serializada, (GRUPO_MULTICAST, PORTA_UDP_MULTICAST))
-        print(f"[Descoberta Multicast] Requisição multicast enviada para {GRUPO_MULTICAST}:{PORTA_UDP_MULTICAST}")
-    except Exception as e:
-        print(f"[Descoberta Multicast] Erro ao enviar requisição multicast: {e}")
-    finally:
-        multicast_socket.close()
+        # Sockets
+        self.socket_tcp = None
+        self.socket_multicast = None
+        self.socket_udp = None
 
-def escutar_respostas_multicast():
-    listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listen_socket.bind(('', PORTA_UDP_MULTICAST)) 
+    def iniciar_servidor_tcp(self):
+        """Inicia o servidor TCP para comunicação com clientes"""
+        self.socket_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket_tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket_tcp.bind((IP_GATEWAY, PORTA_TCP_CLIENTE))
+        self.socket_tcp.listen(5)
+        print(f"[Gateway] Servidor TCP iniciado em {IP_GATEWAY}:{PORTA_TCP_CLIENTE}")
 
-    mreq = struct.pack("4sl", socket.inet_aton(GRUPO_MULTICAST), socket.INADDR_ANY)
-    listen_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    def iniciar_multicast(self):
+        """Configura o socket multicast para descoberta de dispositivos"""
+        self.socket_multicast = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket_multicast.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Junta-se ao grupo multicast sem bind
+        mreq = struct.pack("4sl", socket.inet_aton(GRUPO_MULTICAST), socket.INADDR_ANY)
+        self.socket_multicast.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        print(f"[Gateway] Escutando multicast no grupo {GRUPO_MULTICAST}")
 
-    print(f"[Descoberta Multicast] Escutando respostas multicast em {GRUPO_MULTICAST}:{PORTA_UDP_MULTICAST}...")
+    def iniciar_udp_dispositivos(self):
+        """Inicia socket UDP para comunicação com dispositivos"""
+        self.socket_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket_udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket_udp.bind((IP_GATEWAY, PORTA_UDP_DISPOSITIVOS))
+        print(f"[Gateway] Escutando dispositivos em UDP {IP_GATEWAY}:{PORTA_UDP_DISPOSITIVOS}")
 
-    while True:
-        try:
-            data, address = listen_socket.recvfrom(1024) 
-            discovery_response = gateway_atuadores_pb2.DescobertaMulticast()
-            discovery_response.ParseFromString(data)
+    def enviar_requisicao_descoberta(self):
+        """Envia requisição de descoberta para dispositivos"""
+        req = gateway_atuadores_pb2.DescobertaMulticast()
+        req.tipo_mensagem = gateway_atuadores_pb2.DescobertaMulticast.REQUISICAO_DESCOBERTA
+        req.ip_gateway = IP_GATEWAY
+        req.porta_gateway_tcp = PORTA_TCP_CLIENTE
+        
+        self.socket_multicast.sendto(req.SerializeToString(), (GRUPO_MULTICAST, PORTA_UDP_MULTICAST))
+        print("[Gateway] Requisição de descoberta enviada")
 
-            if discovery_response.tipo_mensagem == gateway_atuadores_pb2.DescobertaMulticast.RESPOSTA_DESCOBERTA:
-                info_dispositivo = discovery_response.informacao_dispositivo 
-                with dispositivos_lock:
-                    if info_dispositivo.id not in dispositivos_conectados:
-                        dispositivos_conectados[info_dispositivo.id] = {
-                            "tipo": info_dispositivo.tipo, 
-                            "ip": info_dispositivo.ip,
-                            "porta": info_dispositivo.porta, 
-                            "estado": info_dispositivo.estado 
-                        }
-                        print(f"[Descoberta Multicast] Dispositivo descoberto: ID={info_dispositivo.id}, Tipo={info_dispositivo.tipo}, IP={info_dispositivo.ip}, Porta={info_dispositivo.porta}, Estado={info_dispositivo.estado}")
-                    else:
-                        
-                        dispositivos_conectados[info_dispositivo.id]["estado"] = info_dispositivo.estado
-                        
-        except socket.timeout:
-            continue
-        except Exception as e:
-            print(f"[Descoberta Multicast] Erro ao processar resposta multicast: {e}")
-
-
-def tratar_cliente(conexao, endereco_cliente):
-
-    print(f"[Cliente] Conexão estabelecida com o cliente {endereco_cliente}")
-    while True:
-        try:
-            
-            tamanho_bytes = conexao.recv(4)
-            if not tamanho_bytes: 
-                break
-            tamanho_mensagem = int.from_bytes(tamanho_bytes, 'big')
-
-            
-            dados_recebidos = b''
-            while len(dados_recebidos) < tamanho_mensagem:
-                pacote = conexao.recv(tamanho_mensagem - len(dados_recebidos))
-                if not pacote: 
-                    break
-                dados_recebidos += pacote
-            
-            if not dados_recebidos:
-                break 
-
-            requisicao = cliente_gateway_pb2.ClienteRequisicao() 
-            requisicao.ParseFromString(dados_recebidos)
-
-            resposta = cliente_gateway_pb2.RespostaGateway() 
-            resposta.sucesso = True 
-
-            if requisicao.tipo_requisicao == cliente_gateway_pb2.ClienteRequisicao.LISTAR_DISPOSITIVOS: 
-                print(f"[Cliente {endereco_cliente}] Requisição: LISTAR_DISPOSITIVOS")
-                resposta.tipo_resposta = cliente_gateway_pb2.RespostaGateway.LISTA_DISPOSITIVOS 
-                with dispositivos_lock:
-                    for dev_id, info in dispositivos_conectados.items():
-                        device_proto = resposta.dispositivos.add() 
-                        device_proto.id = dev_id
-                        device_proto.tipo = info['tipo']
-                        device_proto.ip = info['ip']
-                        device_proto.porta = info['porta']
-                        device_proto.estado = info['estado']
-            
-            elif requisicao.tipo_requisicao == cliente_gateway_pb2.ClienteRequisicao.ENVIAR_COMANDO: 
-                print(f"[Cliente {endereco_cliente}] Requisição: ENVIAR_COMANDO para {requisicao.comando_cliente.id_dispositivo}")
-                resposta.tipo_resposta = cliente_gateway_pb2.RespostaGateway.STATUS_COMANDO 
-                
-                id_dispositivo = requisicao.comando_cliente.id_dispositivo 
-                tipo_comando_cliente = requisicao.comando_cliente.tipo_comando 
-                valor_comando = requisicao.comando_cliente.valor
-
-                with dispositivos_lock:
-                    if id_dispositivo in dispositivos_conectados:
-                        info_atuador = dispositivos_conectados[id_dispositivo]
-                        
-                        
-                        try:
-                            
-                            comando_atuador_pb = gateway_atuadores_pb2.ComandoAtuador()
-                            comando_atuador_pb.id_dispositivo = id_dispositivo
-                            
-                            
-                            if tipo_comando_cliente == cliente_gateway_pb2.ComandoCliente.LIGAR_DESLIGAR:
-                                comando_atuador_pb.tipo_comando = gateway_atuadores_pb2.ComandoAtuador.LIGAR_DESLIGAR
-                                comando_atuador_pb.valor = "" 
-                            elif tipo_comando_cliente == cliente_gateway_pb2.ComandoCliente.DEFINIR_TEMPERATURA:
-                                comando_atuador_pb.tipo_comando = gateway_atuadores_pb2.ComandoAtuador.DEFINIR_TEMPERATURA
-                                comando_atuador_pb.valor = valor_comando
-                            
-
-                            
-                            if comando_atuador_pb.tipo_comando != gateway_atuadores_pb2.ComandoAtuador.COMANDO_ATUADOR_DESCONHECIDO:
-                                atuador_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                                
-                                atuador_socket.connect((info_atuador['ip'], info_atuador['porta']))
-                                
-                                serializado_comando_atuador = comando_atuador_pb.SerializeToString()
-                                atuador_socket.sendall(len(serializado_comando_atuador).to_bytes(4, 'big') + serializado_comando_atuador)
-                                
-                                
-                                
-                                
-
-                                atuador_socket.close()
-                                print(f"[Gateway->Atuador] Comando '{gateway_atuadores_pb2.ComandoAtuador.TipoComandoAtuador.Name(comando_atuador_pb.tipo_comando)}' enviado para {id_dispositivo} via TCP.")
-                                resposta.mensagem = f"Comando enviado com sucesso para {id_dispositivo}."
-                                
-                                
-                                if comando_atuador_pb.tipo_comando == gateway_atuadores_pb2.ComandoAtuador.LIGAR_DESLIGAR:
-                                    current_state = info_atuador['estado']
-                                    new_state = "Desligado" if current_state == "Ligado" else "Ligado"
-                                    info_atuador['estado'] = new_state
-                                elif comando_atuador_pb.tipo_comando == gateway_atuadores_pb2.ComandoAtuador.DEFINIR_TEMPERATURA:
-                                    info_atuador['estado'] = f"Temperatura: {valor_comando}C"
-
-                            else:
-                                resposta.sucesso = False
-                                resposta.mensagem = f"Tipo de comando de cliente desconhecido ou não mapeado para {id_dispositivo}."
-                                print(f"[Comando] Tipo de comando de cliente desconhecido: {tipo_comando_cliente}")
-
-                        except Exception as atu_e:
-                            resposta.sucesso = False
-                            resposta.mensagem = f"Falha ao comunicar com o atuador {id_dispositivo} via TCP: {atu_e}"
-                            print(f"[Gateway->Atuador] Erro ao enviar comando TCP para {id_dispositivo}: {atu_e}")
-                    else:
-                        resposta.sucesso = False
-                        resposta.mensagem = f"Dispositivo {id_dispositivo} não encontrado."
-                        print(f"[Comando] Dispositivo {id_dispositivo} não encontrado.")
-            
-            else: 
-                resposta.tipo_resposta = cliente_gateway_pb2.RespostaGateway.ERRO
-                resposta.sucesso = False
-                resposta.mensagem = "Requisição desconhecida."
-                print(f"[Erro] Requisição desconhecida: {requisicao.tipo_requisicao}")
-
-            
-            serializado = resposta.SerializeToString()
-            conexao.sendall(len(serializado).to_bytes(4, 'big') + serializado)
-
-        except Exception as e:
-            print(f"[Cliente {endereco_cliente}] Erro ao tratar requisição: {e}")
-            break 
-    
-    print(f"[Cliente {endereco_cliente}] Conexão encerrada.")
-    conexao.close()
-
-
-
-def escutar_dispositivos_udp():
-
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
-    udp_socket.bind((IP_GATEWAY, PORTA_UDP_DISPOSITIVOS))
-    print(f"[Dispositivos UDP] Escutando dados/estado de dispositivos UDP em {IP_GATEWAY}:{PORTA_UDP_DISPOSITIVOS}...")
-
-    while True:
-        try:
-            data, address = udp_socket.recvfrom(1024)
-            
-            atualizacao_estado = gateway_atuadores_pb2.AtualizacaoEstadoDispositivo()
-            atualizacao_estado.ParseFromString(data)
-
-            with dispositivos_lock:
-                if atualizacao_estado.id_dispositivo in dispositivos_conectados:
-                    
-                    dispositivos_conectados[atualizacao_estado.id_dispositivo]["estado"] = atualizacao_estado.estado_atual
-                    print(f"[Dispositivos UDP] Estado/Leitura atualizado para {atualizacao_estado.id_dispositivo}: {atualizacao_estado.estado_atual} (Valor: {atualizacao_estado.valor_leitura} {atualizacao_estado.unidade})")
-                else:
-                    print(f"[Dispositivos UDP] Recebido dado de dispositivo não descoberto: ID={atualizacao_estado.id_dispositivo} de {address}")
-        except Exception as e:
-            print(f"[Dispositivos UDP] Erro ao receber dados UDP de dispositivos: {e}")
-
-
-if __name__ == '__main__':
-    
-    server_tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
-    server_tcp_socket.bind((IP_GATEWAY, PORTA_TCP_CLIENTE))
-    server_tcp_socket.listen(5) 
-    print(f"[Gateway] Servidor TCP para clientes iniciado em {IP_GATEWAY}:{PORTA_TCP_CLIENTE}")
-
-    
-    threading.Thread(target=escutar_respostas_multicast, daemon=True).start()
-
-    
-    threading.Thread(target=escutar_dispositivos_udp, daemon=True).start()
-
-    
-    def loop_descoberta():
+    def tratar_resposta_multicast(self):
+        """Processa respostas de descoberta de dispositivos"""
         while True:
-            iniciar_descoberta_multicast()
-            time.sleep(10) 
-    threading.Thread(target=loop_descoberta, daemon=True).start()
+            try:
+                data, addr = self.socket_multicast.recvfrom(1024)
+                resposta = gateway_atuadores_pb2.DescobertaMulticast()
+                resposta.ParseFromString(data)
 
-    
-    while True:
+                if resposta.tipo_mensagem == gateway_atuadores_pb2.DescobertaMulticast.RESPOSTA_DESCOBERTA:
+                    dispositivo = resposta.informacao_dispositivo
+                    
+                    with self.dispositivos_lock:
+                        if dispositivo.id not in self.dispositivos_conectados:
+                            self.dispositivos_conectados[dispositivo.id] = {
+                                'tipo': dispositivo.tipo,
+                                'ip': dispositivo.ip,
+                                'porta': dispositivo.porta,
+                                'estado': dispositivo.estado
+                            }
+                            print(f"[Gateway] Novo dispositivo registrado: {dispositivo.id}")
+                        else:
+                            # Atualiza estado se dispositivo já existir
+                            self.dispositivos_conectados[dispositivo.id]['estado'] = dispositivo.estado
+
+            except Exception as e:
+                print(f"[Gateway] Erro no multicast: {e}")
+
+    def tratar_cliente(self, conexao, endereco):
+        """Gerencia conexão com um cliente"""
+        print(f"[Gateway] Cliente conectado: {endereco}")
+        
         try:
-            conn, addr = server_tcp_socket.accept()
-            
-            threading.Thread(target=tratar_cliente, args=(conn, addr), daemon=True).start()
-        except Exception as e:
-            print(f"[Gateway] Erro ao aceitar nova conexão TCP: {e}")
-            break
+            while True:
+                # Recebe tamanho da mensagem
+                tamanho_bytes = conexao.recv(4)
+                if not tamanho_bytes:
+                    break
+                tamanho = int.from_bytes(tamanho_bytes, 'big')
 
-    server_tcp_socket.close()
-    print("[Gateway] Servidor encerrado.")
+                # Recebe mensagem completa
+                dados = b''
+                while len(dados) < tamanho:
+                    parte = conexao.recv(tamanho - len(dados))
+                    if not parte:
+                        break
+                    dados += parte
+
+                requisicao = cliente_gateway_pb2.ClienteRequisicao()
+                requisicao.ParseFromString(dados)
+
+                resposta = cliente_gateway_pb2.RespostaGateway()
+                
+                if requisicao.request_type == cliente_gateway_pb2.ClienteRequisicao.LISTAR_DISPOSITIVOS:
+                    resposta = self.processar_listagem()
+                
+                elif requisicao.request_type == cliente_gateway_pb2.ClienteRequisicao.ENVIAR_COMANDO:
+                    resposta = self.processar_comando(requisicao.comando_cliente)
+                
+                # Envia resposta
+                serializado = resposta.SerializeToString()
+                conexao.sendall(len(serializado).to_bytes(4, 'big') + serializado)
+
+        except Exception as e:
+            print(f"[Gateway] Erro com cliente {endereco}: {e}")
+        finally:
+            conexao.close()
+            print(f"[Gateway] Cliente desconectado: {endereco}")
+
+    def processar_listagem(self):
+        """Prepara resposta com lista de dispositivos"""
+        resposta = cliente_gateway_pb2.RespostaGateway()
+        resposta.response_type = cliente_gateway_pb2.RespostaGateway.LISTAR_DISPOSITIVOS
+        
+        with self.dispositivos_lock:
+            for dev_id, info in self.dispositivos_conectados.items():
+                dispositivo = resposta.devices.add()
+                dispositivo.id = dev_id
+                dispositivo.tipo = info['tipo']
+                dispositivo.ip = info['ip']
+                dispositivo.porta = info['porta']
+                dispositivo.estado = info['estado']
+        
+        return resposta
+
+    def processar_comando(self, comando_cliente):
+        """Processa comando do cliente e envia para o dispositivo"""
+        resposta = cliente_gateway_pb2.RespostaGateway()
+        resposta.response_type = cliente_gateway_pb2.RespostaGateway.ENVIAR_COMANDO
+        
+        with self.dispositivos_lock:
+            if comando_cliente.id_dispositivo not in self.dispositivos_conectados:
+                resposta.sucesso = False
+                resposta.message = f"Dispositivo {comando_cliente.id_dispositivo} não encontrado"
+                return resposta
+
+            dispositivo = self.dispositivos_conectados[comando_cliente.id_dispositivo]
+            
+            try:
+                # Converte comando do cliente para comando do dispositivo
+                comando = gateway_atuadores_pb2.ComandoAtuador()
+                comando.id_dispositivo = comando_cliente.id_dispositivo
+                
+                # Mapeamento de tipos de comando
+                if comando_cliente.tipo_comando == cliente_gateway_pb2.ComandoCliente.LIGAR_DESLIGAR:
+                    comando.tipo_comando = gateway_atuadores_pb2.ComandoAtuador.LIGAR_DESLIGAR
+                elif comando_cliente.tipo_comando == cliente_gateway_pb2.ComandoCliente.DEFINIR_TEMPERATURA:
+                    comando.tipo_comando = gateway_atuadores_pb2.ComandoAtuador.DEFINIR_TEMPERATURA
+                    comando.valor = comando_cliente.valor
+                
+                # Envia comando via UDP para o dispositivo
+                self.socket_udp.sendto(
+                    comando.SerializeToString(),
+                    (dispositivo['ip'], dispositivo['porta'])
+                )
+                
+                resposta.sucesso = True
+                resposta.message = f"Comando enviado para {comando_cliente.id_dispositivo}"
+                
+                # Atualiza estado local
+                if comando.tipo_comando == gateway_atuadores_pb2.ComandoAtuador.LIGAR_DESLIGAR:
+                    dispositivo['estado'] = "ligado" if dispositivo['estado'] == "desligado" else "desligado"
+                
+            except Exception as e:
+                resposta.sucesso = False
+                resposta.message = f"Erro ao enviar comando: {str(e)}"
+        
+        return resposta
+
+    def monitorar_dispositivos_udp(self):
+        """Recebe atualizações de estado dos dispositivos"""
+        while True:
+            try:
+                data, addr = self.socket_udp.recvfrom(1024)
+                atualizacao = gateway_atuadores_pb2.AtualizacaoEstadoDispositivo()
+                atualizacao.ParseFromString(data)
+                
+                with self.dispositivos_lock:
+                    if atualizacao.id_dispositivo in self.dispositivos_conectados:
+                        self.dispositivos_conectados[atualizacao.id_dispositivo]['estado'] = atualizacao.estado_atual
+                        print(f"[Gateway] Estado atualizado: {atualizacao.id_dispositivo} = {atualizacao.estado_atual}")
+                    
+            except Exception as e:
+                print(f"[Gateway] Erro ao receber atualização UDP: {e}")
+
+    def loop_descoberta(self):
+        """Envia requisições de descoberta periodicamente"""
+        while True:
+            self.enviar_requisicao_descoberta()
+            time.sleep(10)
+
+    def executar(self):
+        """Inicia todos os serviços do gateway"""
+        try:
+            self.iniciar_servidor_tcp()
+            self.iniciar_multicast()
+            self.iniciar_udp_dispositivos()
+
+            # Threads
+            threading.Thread(target=self.tratar_resposta_multicast, daemon=True).start()
+            threading.Thread(target=self.monitorar_dispositivos_udp, daemon=True).start()
+            threading.Thread(target=self.loop_descoberta, daemon=True).start()
+
+            # Loop principal para aceitar clientes
+            while True:
+                conexao, endereco = self.socket_tcp.accept()
+                threading.Thread(target=self.tratar_cliente, args=(conexao, endereco), daemon=True).start()
+
+        except KeyboardInterrupt:
+            print("\n[Gateway] Desligando...")
+        finally:
+            if self.socket_tcp: self.socket_tcp.close()
+            if self.socket_multicast: self.socket_multicast.close()
+            if self.socket_udp: self.socket_udp.close()
+
+if __name__ == "__main__":
+    gateway = Gateway()
+    gateway.executar()
