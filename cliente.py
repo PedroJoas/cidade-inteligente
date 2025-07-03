@@ -1,5 +1,4 @@
 import socket
-import sys
 from Protos import cliente_gateway_pb2 
 
 class Cliente:
@@ -63,7 +62,7 @@ class Cliente:
         if self.socket_cliente:
             try:
                 self.socket_cliente.close()
-                print("🔌 Desconectado do Gateway.")
+                print("Desconectado do Gateway.")
             except:
                 pass
             finally:
@@ -120,7 +119,7 @@ class Cliente:
             if valor is not None:
                 comando.valor = str(valor)
 
-            print(f"📤 Enviando comando: {cliente_gateway_pb2.ComandoCliente.TipoComando.Name(tipo_comando)}")
+            print(f"Enviando comando: {cliente_gateway_pb2.ComandoCliente.TipoComando.Name(tipo_comando)}")
             
             if not self.enviar_mensagem(requisicao):
                 return
