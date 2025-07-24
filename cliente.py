@@ -1,5 +1,5 @@
 import socket
-from Protos import cliente_gateway_pb2 
+from Protos import cliente_gateway_pb2
 
 class Cliente:
     def __init__(self, ip_gateway='127.0.0.1', porta_gateway=50000):

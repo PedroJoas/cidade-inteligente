@@ -1,125 +1,50 @@
-from utils import multicast
-import socket
-import struct
-import time
+import pika
+import json
 import random
-import threading
-from Protos import gateway_atuadores_pb2 as proto
+import time
+import socket
 
-class SensorTemperatura:
-    def __init__(self):
-        # Configurações do dispositivo
-        self.id_dispositivo = "sensor_temp_001"
-        self.tipo_dispositivo = "SensorTemperatura"
-        self.estado = "operacional"
-        self.unidade_medida = "Celsius"
-        
-        # Configurações de rede
-        self.grupo_multicast = '224.1.1.1'
-        self.porta_multicast = 12346
-        self.porta_udp = 5007
-        self.ip_gateway = '127.0.0.1'
-        self.porta_gateway_udp = 12347
-        
-        # Sockets
-        self.socket_multicast = None
-        self.socket_udp = None
+# Configurações do RabbitMQ
+RABBITMQ_HOST = 'localhost'
+RABBITMQ_PORT = 5672
+QUEUE_NAME = 'sensor_temperatura'
 
-    def participar_descoberta(self):
-        """Participa do grupo multicast e responde às requisições do gateway"""
-        self.socket_multicast = multicast.criar_socket_multicast_receptor()
-        print("[SENSOR] Pronto para receber requisições de descoberta...")
+# Função para simular leitura de temperatura
+def ler_temperatura():
+    return round(random.uniform(20.0, 35.0), 2)
 
-        while True:
-            try:
-                dados, endereco = self.socket_multicast.recvfrom(1024)
-                mensagem = proto.DescobertaMulticast()
-                mensagem.ParseFromString(dados)
+# Descobrir IP local (útil para identificação)
+def get_ip_local():
+    return socket.gethostbyname(socket.gethostname())
 
-                if mensagem.tipo_mensagem == proto.DescobertaMulticast.REQUISICAO_DESCOBERTA:
-                    print(f"[SENSOR] Recebida requisição do gateway {endereco}")
+def iniciar_sensor():
+    # Conecta ao RabbitMQ
+    connection = pika.BlockingConnection(
+        pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT)
+    )
+    channel = connection.channel()
 
-                    # Prepara resposta
-                    resposta = proto.DescobertaMulticast()
-                    resposta.tipo_mensagem = proto.DescobertaMulticast.RESPOSTA_DESCOBERTA
-                    resposta.ip_gateway = endereco[0]
-                    resposta.porta_gateway_tcp = mensagem.porta_gateway_tcp
+    # Garante que a fila existe
+    channel.queue_declare(queue=QUEUE_NAME, durable=True)
 
-                    # Informações do dispositivo
-                    info = resposta.informacao_dispositivo
-                    info.id = self.id_dispositivo
-                    info.tipo = self.tipo_dispositivo
-                    info.ip = socket.gethostbyname(socket.gethostname())
-                    info.porta = self.porta_udp
-                    info.estado = self.estado
+    print("Sensor de temperatura iniciado. Enviando dados para fila:", QUEUE_NAME)
 
-                    self.socket_multicast.sendto(resposta.SerializeToString(), endereco)
-                    print("[SENSOR] Resposta de descoberta enviada ao gateway")
+    while True:
+        temperatura = ler_temperatura()
+        mensagem = {
+            'tipo': 'temperatura',
+            'valor': temperatura,
+            'unidade': 'C',
+            'timestamp': time.time(),
+            'ip_sensor': get_ip_local()
+        }
+        channel.basic_publish(
+            exchange='',
+            routing_key=QUEUE_NAME,
+            body=json.dumps(mensagem)
+        )
+        print(f"[Sensor] Enviado: {mensagem}")
+        time.sleep(15)  # Envia a cada 15 segundos
 
-            except Exception as erro:
-                print(f"[SENSOR] Erro na descoberta multicast: {erro}")
-
-    def enviar_leituras(self):
-        """Envia leituras de temperatura periódicas para o gateway"""
-        self.socket_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        
-        while True:
-            try:
-                # Simula leitura de temperatura
-                temperatura = round(random.uniform(20.0, 30.0), 2)
-                
-                # Prepara mensagem
-                mensagem = proto.AtualizacaoEstadoDispositivo()
-                mensagem.id_dispositivo = self.id_dispositivo
-                mensagem.estado_atual = self.estado
-                mensagem.valor_leitura = temperatura
-                mensagem.unidade = self.unidade_medida
-
-                # Envia para o gateway
-                self.socket_udp.sendto(
-                    mensagem.SerializeToString(),
-                    (self.ip_gateway, self.porta_gateway_udp)
-                )
-                
-                print(f"[SENSOR] Temperatura enviada: {temperatura}°C")
-                time.sleep(15)  # Intervalo entre leituras
-
-            except Exception as erro:
-                print(f"[SENSOR] Erro ao enviar leitura: {erro}")
-                time.sleep(5)
-
-    def executar(self):
-        """Inicia todas as funcionalidades do sensor"""
-        try:
-            # Thread para descoberta multicast
-            thread_descoberta = threading.Thread(
-                target=self.participar_descoberta,
-                daemon=True
-            )
-            
-            # Thread para envio de leituras
-            thread_leituras = threading.Thread(
-                target=self.enviar_leituras,
-                daemon=True
-            )
-
-            thread_descoberta.start()
-            thread_leituras.start()
-
-            print("[SENSOR] Sensor de temperatura em operação")
-            
-            # Mantém as threads ativas
-            while True:
-                time.sleep(1)
-
-        except KeyboardInterrupt:
-            print("\n[SENSOR] Desligando sensor...")
-        finally:
-            if self.socket_multicast:
-                self.socket_multicast.close()
-            if self.socket_udp:
-                self.socket_udp.close()
-
-if __name__ == "__main__":
-    sensor = SensorTemperatura()
-    sensor.executar()
+if __name__ == '__main__':
+    iniciar_sensor()

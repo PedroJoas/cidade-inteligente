@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Cliente de Controle</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      overflow-x: hidden;
+    }
+    .sidebar {
+      height: 100vh;
+      background-color: #f8f9fa;
+      padding: 1rem;
+    }
+    .sidebar h5 {
+      margin-top: 1rem;
+    }
+    .content {
+      padding: 2rem;
+    }
+    .sensor-list li {
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="row g-0">
+    <!-- Sidebar -->
+    <div class="col-md-3 sidebar">
+    <h4>🔌 Atuadores</h4>
+    <ul class="nav flex-column">
+      {% for id, info in atuadores.items() %}
+        <li class="nav-item mb-2">
+          <strong>{{ id }}</strong><br>
+          <form action="/comando" method="post" class="d-flex gap-1 mt-1">
+            <input type="hidden" name="id" value="{{ id }}">
+            <button name="acao" value="ligar" class="btn btn-sm btn-success">Ligar</button>
+            <button name="acao" value="desligar" class="btn btn-sm btn-danger">Desligar</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <h5>🌡️ Sensores</h5>
+    <ul class="nav flex-column">
+      {% for id, info in sensores.items() %}
+        <li class="nav-item">
+          <a class="nav-link" href="/sensores/{{ id }}">{{ id }}</a>
+        </li>
+      {% endfor %}
+</ul>
+
+    </div>
+
+    <!-- Conteúdo principal -->
+    <div class="col-md-9 content">
+      {% if sensores %}
+        <h3>Leituras de {{ tipo }}</h3>
+        <ul class="list-group">
+          {% for s in sensores %}
+            <li class="list-group-item">
+              <strong>{{ s.timestamp | round(0) }}:</strong> {{ s.valor }} {{ s.unidade }}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <h3>Bem-vindo à central de controle</h3>
+        <p>Use a barra lateral para controlar atuadores e visualizar sensores em tempo real.</p>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>
