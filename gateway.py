@@ -1,63 +1,89 @@
 from flask import Flask, jsonify, request
-from gateway_logica import GatewayCore  # Sua classe central
+from gateway_logica import GatewayCore
 
 app = Flask(__name__)
 gw = GatewayCore()
-gw.iniciar_descoberta_dispositivos()  
 
-@app.route('/dispositivos/estado/<id>', methods=['GET'])
+@app.route('/atuadores', methods=['GET'])
+def listar_atuadores():
+    # Lista de atuadores já registrados
+    atuadores = gw.listar_atuadores()
+    return jsonify(atuadores)
+
+@app.route('/sensores', methods=['GET'])
+def listar_sensores():
+    print("Listando sensores...")
+    # Lista de sensores (mesmo dispositivos, filtrados)
+    sensores = gw.listar_sensores()
+    return jsonify(sensores)
+
+@app.route('/atuadores/<id>/estado', methods=['GET'])
 def consultar_estado(id):
+    # Retorna estado e configurações do atuador
     try:
         estado = gw.estado_atuador(id)
         return jsonify({
+            'id': id,
             'estado': estado.estado,
             'configuracoes': dict(estado.configuracoes)
         })
+    except KeyError:
+        return jsonify({'erro': f'Atuador {id} não encontrado'}), 404
     except Exception as e:
-        return jsonify({'erro': str(e)}), 404
+        return jsonify({'erro': str(e)}), 500
 
-@app.route('/dispositivos/comando/<id>', methods=['POST'])
+@app.route('/atuadores/<id>/comando', methods=['POST'])
 def enviar_comando(id):
-    comando = request.json.get('comando')
+    data = request.get_json() or {}
+    comando = data.get('comando')
+    if comando not in ('ligar', 'desligar'):
+        return jsonify({'erro': 'Comando inválido'}), 400
+
     try:
         if comando == 'ligar':
-            resposta = gw.ligar_atuador(id)
-        elif comando == 'desligar':
-            resposta = gw.desligar_atuador(id)
-        else:
-            return jsonify({'erro': 'Comando inválido'}), 400
-        return jsonify({
-            'mensagem': resposta.mensagem,
-            'sucesso': resposta.sucesso
-        })
-    except Exception as e:
-        return jsonify({'erro': str(e)}), 404
+            resp = gw.ligar_atuador(id)
+        else:  # desligar
+            resp = gw.desligar_atuador(id)
 
-@app.route('/dispositivos/configurar/<id>', methods=['POST'])
+        return jsonify({
+            'id': id,
+            'mensagem': resp.mensagem,
+            'sucesso': resp.sucesso
+        })
+    except KeyError:
+        return jsonify({'erro': f'Atuador {id} não encontrado'}), 404
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/atuadores/<id>/configurar', methods=['POST'])
 def configurar(id):
-    parametro = request.json.get('parametro')
-    valor = request.json.get('valor')
+    data = request.get_json() or {}
+    parametro = data.get('parametro')
+    valor = data.get('valor')
+
+    if not parametro or not valor:
+        return jsonify({'erro': 'parametro e valor são obrigatórios'}), 400
+
     try:
-        resposta = gw.configurar_atuador(id, parametro, valor)
+        resp = gw.configurar_atuador(id, parametro, valor)
         return jsonify({
-            'mensagem': resposta.mensagem,
-            'sucesso': resposta.sucesso
+            'id': id,
+            'mensagem': resp.mensagem,
+            'sucesso': resp.sucesso
         })
+    except KeyError:
+        return jsonify({'erro': f'Atuador {id} não encontrado'}), 404
     except Exception as e:
-        return jsonify({'erro': str(e)}), 404
+        return jsonify({'erro': str(e)}), 500
 
-@app.route('/sensores/<tipo>', methods=['GET'])
-def consultar_sensores(tipo):
-    dados = gw.get_leituras_sensor(tipo)
-    return jsonify({'leituras': dados})
-
-@app.route('/atuadores')
-def listar_atuadores():
-    return gw.dispositivos
-
-@app.route('/sensores')
-def listar_sensores():
-    return jsonify(gw.listar_sensores())
+@app.route('/sensores/<fila>/leituras', methods=['GET'])
+def consultar_sensores(fila):
+    # Retorna leituras de uma fila de sensor específica
+    leituras = gw.get_leituras_sensor(fila)
+    return jsonify({
+        'fila': fila,
+        'leituras': leituras
+    })
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)

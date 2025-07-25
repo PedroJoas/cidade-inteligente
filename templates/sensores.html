@@ -1,44 +1,28 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dispositivos - Cidade Inteligente</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .online { color: green; }
-        .offline { color: red; }
-    </style>
-</head>
-<body>
-    <div class="container mt-5">
-        <h1 class="mb-4">Sensores Conectados</h1>
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Nome</th>
-                    <th>ID</th>
-                    <th>IP</th>
-                    <th>Status</th>
-                    <th>Tipo</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for device_id, device in devices.items() %}
-                <tr>
-                    <td>{{ devices.get('name', device_id) }}</td>
-                    <td>{{ device_id }}</td>
-                    <td>{{ device.ip }}</td>
-                    <td class="{{ 'online' if device.status == 'ONLINE' else 'offline' }}">
-                        {{ device.status }}
-                    </td>
-                    <td>{{ device.type }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+{% extends 'base.html' %}
+{% block content %}
+  <h1>Sensores</h1>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+  <table>
+  <thead>
+    <tr>
+      <th>Sensor</th>
+      <th>Fila</th>
+      <th>Último Valor</th>
+      <th>IP</th>
+      <th>Última Leitura</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for id, dados in sensores.items() %}
+    <tr>
+      <td>{{ id }}</td>
+      <td>{{ dados.fila }}</td>
+      <td>{{ dados.todos_valores[-1] }}</td>
+      <td>{{ dados.ip_sensor }}</td>
+      <td>{{ dados.ultima_leitura }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

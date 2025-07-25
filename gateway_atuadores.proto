@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package atuador;
+
+service AtuadorService {
+  rpc Ligar (Empty) returns (Resposta); 
+  rpc Desligar (Empty) returns (Resposta); 
+  rpc AlterarConfiguracao (ConfiguracaoRequest) returns (Resposta); 
+  rpc ConsultarEstado (Empty) returns (EstadoResponse); 
+}
+
+message Empty {}
+
+message ConfiguracaoRequest {
+  string parametro = 1; 
+  string valor = 2;     
+}
+
+message Resposta {
+  string mensagem = 1;
+  bool sucesso = 2;
+}
+
+message EstadoResponse {
+  string estado = 1; 
+  map<string, string> configuracoes = 2; 
+}

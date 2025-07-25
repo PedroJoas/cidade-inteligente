@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h1>Atuadores</h1>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Nome</th>
+        <th>Estado</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for id, a in atuadores.items() %}
+  <tr>
+    <td>{{ a.nome }}</td>
+    <td>{{ a.status }}</td>
+    <td>
+        <!-- Botão Ligar -->
+        <form method="post" style="display:inline">
+            <input type="hidden" name="id" value="{{ a.id }}" />
+            <button type="submit" name="comando" value="ligar">Ligar</button>
+        </form>
+
+        <!-- Botão Desligar -->
+        <form method="post" style="display:inline">
+            <input type="hidden" name="id" value="{{ a.id }}" />
+            <button type="submit" name="comando" value="desligar">Desligar</button>
+        </form>
+
+        <!-- Botão Configurar -->
+        <form method="post" style="display:inline; margin-top:4px">
+            <input type="hidden" name="id" value="{{ a.id }}" />
+            <input type="text" name="parametro" placeholder="Parâmetro" required />
+            <input type="text" name="valor" placeholder="Valor" required />
+            <button type="submit" name="comando" value="configurar">Configurar</button>
+        </form>
+    </td>
+
+  </tr>
+{% endfor %}
+
+    </tbody>
+  </table>
+
+
+{% endblock %}

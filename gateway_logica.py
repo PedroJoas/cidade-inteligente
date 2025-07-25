@@ -1,4 +1,3 @@
-import socket
 import grpc
 import threading
 import json
@@ -6,17 +5,28 @@ import pika
 from gateway_atuadores_pb2_grpc import AtuadorServiceStub
 from gateway_atuadores_pb2 import Empty, ConfiguracaoRequest
 
-MCAST_GRP = '239.255.0.1'
-MCAST_PORT = 5007
-OUVIR_PORTA = 6000
 RABBITMQ_HOST = 'localhost'
 SENSOR_FILAS = ['sensor_temperatura', 'sensor_umidade']
 
+
 class GatewayCore:
+    
+    DEFAULT_ATUADORES = [
+        {'id_atuador': 'semaforo', 'nome':'Semaforo Rua 1','host': 'localhost', 'port': 50051, 'tipo': 'atuador'},
+        {'id_atuador': 'camera',  'nome':'Camera Portao 1', 'host': 'localhost', 'port': 50052, 'tipo': 'atuador'},
+        {'id_atuador': 'poste', 'nome':'Poste Rua 1', 'host': 'localhost', 'port': 50053,  'tipo': 'atuador'},
+    ]
+
     def __init__(self):
-        self.dispositivos = {}
+        self.dispositivos = {}  # Registros de sensores e atuadores
+        self.atuadores = {}     # Stubs gRPC dos atuadores
+        self.sensores = {}     # Leituras sensoriais
+
         self._iniciar_rabbitmq()
         self._iniciar_consumo_sensores()
+
+        # Registrar todos os atuadores pré-definidos
+        self._registrar_atuadores()
 
     # ---------- RABBITMQ ----------
     def _iniciar_rabbitmq(self):
@@ -32,7 +42,8 @@ class GatewayCore:
             for fila in SENSOR_FILAS:
                 self.rabbit_channel.basic_consume(
                     queue=fila,
-                    on_message_callback=lambda ch, method, props, body, f=fila: self._callback_sensor(ch, method, props, body, f),
+                    on_message_callback=lambda ch, method, props, body, f=fila: 
+                        self._callback_sensor(ch, method, props, body, f),
                     auto_ack=True
                 )
             print("[Gateway] Consumindo dados sensoriais...")
@@ -42,87 +53,86 @@ class GatewayCore:
 
     def _callback_sensor(self, ch, method, properties, body, fila):
         dados = json.loads(body)
-        self.sensores.setdefault(fila, []).append(dados)
-        print(f"[Sensor {fila}] -> {dados}")
+        sensor_id = dados.get("id_sensor")
+
+        if sensor_id:
+            if sensor_id not in self.sensores:
+                self.sensores[sensor_id] = {
+                    "fila": fila,
+                    "valores": [],  # Histórico de valores
+                    "datahoras": [],  # Histórico de timestamps
+                    "ip_sensor": dados.get("ip_sensor")
+                }
+
+            self.sensores[sensor_id]["valores"].append(dados.get("valor"))
+            self.sensores[sensor_id]["datahoras"].append(dados.get("datahora"))
+
+            print(f"[Sensor {sensor_id}] Valor registrado: {dados.get('valor')}")
+
 
     def get_leituras_sensor(self, fila):
-        return self.sensores.get(fila, [])
+        return self.sensores
 
-    # ---------- UDP MULTICAST ----------
-    
-    def enviar_multicast_discovery(self):
-        mensagem = b'{"codigo": "DISCOVERY_GW", "porta": 6000}'
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-        sock.sendto(mensagem, (MCAST_GRP, MCAST_PORT))
-        print(f"[Gateway] Multicast enviado: {mensagem.decode()}")
+    # ---------- REGISTRO DE ATUADORES ----------
+    def _registrar_atuadores(self):
+        for cfg in self.DEFAULT_ATUADORES:
+            self.registrar_atuador(
+                cfg['id_atuador'],
+                cfg['nome'],
+                cfg['host'],
+                cfg['port'],
+                cfg.get('tipo', 'atuador')
+            )
 
-    def iniciar_descoberta_dispositivos(self):
-            self.enviar_multicast_discovery()
-
-            threading.Thread(target=self._escutar_respostas_udp, daemon=True).start()
-
-    def _escutar_respostas_udp(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-
-        sock.bind(('', OUVIR_PORTA))  # Escuta na porta multicast
-        print(f"[Gateway] Escutando respostas de dispositivos na porta {MCAST_PORT}")
-
-        while True:
-            print("[Gateway] Aguardando resposta de dispositivos...")
-            try:
-                data, addr = sock.recvfrom(1024)
-                print(f"[UDP] Resposta de {addr}: {data.decode()}")
-                self._processar_dispositivo_descoberto(data)
-            except Exception as e:
-                print(f"[Erro UDP]: {e}")
-
-    def _processar_dispositivo_descoberto(self, mensagem_bytes):
-        print('[Gateway] Processando dispositivo descoberto...')
-        try:
-            info = json.loads(mensagem_bytes.decode())
-            id = info['id']
-            self.dispositivos[id] = info  # Armazena dispositivo
-
-            if info['tipo'] == 'atuador':
-                self.registrar_atuador(id, info['ip'], info['porta_grpc'])
-
-
-            print(f"[Dispositivo registrado] {id} → {info}")
-        except Exception as e:
-            print(f"[Erro ao processar resposta]: {e}")
-
-    # ---------- gRPC ----------
-    def registrar_atuador(self, id_atuador, host, port):
+    def registrar_atuador(self, id_atuador, nome, host, port, tipo='atuador'):
         canal = grpc.insecure_channel(f"{host}:{port}")
         stub = AtuadorServiceStub(canal)
         self.atuadores[id_atuador] = stub
+        self.dispositivos[id_atuador] = {
+            "id": id_atuador,
+            "nome":nome,
+            "tipo": tipo,
+            "ip": host,
+            "porta_grpc": port
+        }
         print(f"[gRPC] Atuador '{id_atuador}' registrado em {host}:{port}")
 
+    # ---------- CONTROLE DE ATUADORES via gRPC ----------
     def ligar_atuador(self, id_atuador):
-        resposta = self.atuadores[id_atuador].Ligar(Empty())
-        return resposta
+        return self.atuadores[id_atuador].Ligar(Empty())
 
     def desligar_atuador(self, id_atuador):
-        resposta = self.atuadores[id_atuador].Desligar(Empty())
-        return resposta
+        return self.atuadores[id_atuador].Desligar(Empty())
 
     def configurar_atuador(self, id_atuador, parametro, valor):
         req = ConfiguracaoRequest(parametro=parametro, valor=valor)
-        resposta = self.atuadores[id_atuador].AlterarConfiguracao(req)
-        return resposta
+        return self.atuadores[id_atuador].AlterarConfiguracao(req)
 
     def estado_atuador(self, id_atuador):
         return self.atuadores[id_atuador].ConsultarEstado(Empty())
-    
+
+    # ---------- LISTAGENS ----------
     def listar_atuadores(self):
-        return self.dispositivos
+        return {
+            id: info
+            for id, info in self.dispositivos.items()
+            if info.get('tipo') == 'atuador'
+        }
 
     def listar_sensores(self):
-        return {
-            id: dados
-            for id, dados in self.dispositivos.items()
-            if dados.get('tipo') == 'sensor'
-        }
+        sensores_listados = {}
+
+        for sensor_id, dados in self.sensores.items():
+            sensores_listados[sensor_id] = {
+                "fila": dados.get("fila"),
+                "ip_sensor": dados.get("ip_sensor"),
+                "quantidade_leituras": len(dados.get("valores", [])),
+                "ultima_leitura": dados["valores"][-1] if dados.get("valores") else None,
+                "datahora_ultima": dados["datahoras"][-1] if dados.get("datahoras") else None,
+                "todos_valores": dados.get("valores", []),
+                "todos_horarios": dados.get("datahoras", [])
+            }
+
+        return sensores_listados
+
+

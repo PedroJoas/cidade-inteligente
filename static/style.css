@@ -1,0 +1,62 @@
+body, html {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+}
+
+.sidebar {
+  position: fixed;
+  width: 200px;
+  height: 100vh;
+  background: #2c3e50;
+  color: #ecf0f1;
+  padding-top: 1rem;
+}
+
+.sidebar h2 {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.sidebar ul {
+  list-style: none;
+  padding: 0;
+}
+
+.sidebar li {
+  margin: 1rem 0;
+  text-align: center;
+}
+
+.sidebar a {
+  color: #bdc3c7;
+  text-decoration: none;
+}
+
+.sidebar a:hover,
+.sidebar a.active {
+  color: #ecf0f1;
+}
+
+.content {
+  margin-left: 200px;
+  padding: 2rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+button {
+  padding: 0.4rem 0.8rem;
+  margin-right: 0.5rem;
+  cursor: pointer;
+}

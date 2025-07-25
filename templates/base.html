@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Central de monitoramento</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <nav class="sidebar">
+      <h2>Dispositivos</h2>
+      <ul>
+        <li><a href="{{ url_for('atuadores') }}">Atuadores</a></li>
+        <li><a href="{{ url_for('sensores') }}">Sensores</a></li>
+      </ul>
+    </nav>
+
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>
